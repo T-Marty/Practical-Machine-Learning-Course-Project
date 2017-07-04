@@ -1,0 +1,106 @@
+---
+title: "Classification of Weight Lifiting Exercises With HAR"
+output:
+  html_document: default
+  pdf_document: default
+---
+# Overview and Background
+This document constitues a submission for Coursera's *Practical Machine Learning* course project. The aim of the project is to predict the manner in which 6 participants conducted a weight lifting exercise using data obtained from accelerometers on the belt, forearm, arm, and dumbell of the participants. The data for this project came from this source: http://groupware.les.inf.puc-rio.br/har, they have been very generous in allowing their data to be used for this kind of assignment. A short description of the datasets content from the authors' website:
+
+"Six young health participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E).
+
+Class A corresponds to the specified execution of the exercise, while the other 4 classes correspond to common mistakes. Participants were supervised by an experienced weight lifter to make sure the execution complied to the manner they were supposed to simulate. The exercises were performed by six male participants aged between 20-28 years, with little weight lifting experience. We made sure that all participants could easily simulate the mistakes in a safe and controlled manner by using a relatively light dumbbell (1.25kg)."
+
+
+# Data Loading and Processing
+The training and test data is loaded from the sources provided on the Coursera page for the course project. The original training set is broken into a training and validation set so that different models can be tested on 'unseen' data before a final model is selected for the true out-of-sample (OOS) test.
+ 
+```{r, echo=TRUE, message=FALSE, cache=TRUE}
+library(caret)
+tr_url <- 'https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv'
+te_url <- 'https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv'
+train_full <- read.csv(tr_url)[,2:160]
+test_oos <- read.csv(te_url)[,2:160]
+set.seed(323)
+inTrain  <- createDataPartition(train_full$classe, p=0.75, list=FALSE)
+Train <- train_full[inTrain, ]
+Valid  <- train_full[-inTrain, ]
+```
+A quick visual inspection of the training data reveals that many variables consist mainly of zero or NAs. We remove the variables that display these properties (based on *Train* data only) as they will not be useful in building a prediction model. We will also remove identifer variables as specifc timestamps and participants are unlikely to be of OOS data of this nature. In unreported tests, a variable was created to preserve the ordering within specific exercise repetitions using the new_window variable. The intuition was that the temporal variation of features throughout the exercise may follow a pattern that could assist classification. However, the addition of the variable did not improve model accuracy on the validation data so has not been used here.
+```{r, echo=TRUE, cache=TRUE}
+NAvars <- sapply(Train, FUN=function(x){mean(is.na(x))>0.3})
+Train <- Train[,-which(NAvars)]
+Valid <- Valid[,-which(NAvars)]
+
+NZVars <- nearZeroVar(Train)
+Train <- Train[,-NZVars]
+Valid <- Valid[,-NZVars]
+```
+
+# Model Fitting and Validation
+In this section we try four different machine learning approaches, including an ensemble method.
+Validation testing is then conducted to estimate OOS accuracy and select the best-performing model.
+
+## Random Forest
+The first model we construct is a random forest.
+
+```{r, echo=TRUE,message=FALSE,cache=TRUE}
+library(randomForest)
+set.seed(323)
+fit_rf <- train(classe~., data=Train, method="rf")
+pred_rf <- predict(fit_rf, Valid)
+conf_rf <- confusionMatrix(pred_rf,Valid$classe)
+conf_rf
+```
+
+## GBM
+We will now fit a gradient boosting model.
+```{r, echo=TRUE,message=FALSE,cache=TRUE}
+set.seed(323)
+fit_gbm <- train(classe~., data=Train, method="gbm", verbose=FALSE)
+pred_gbm <- predict(fit_gbm, Valid)
+conf_gbm <- confusionMatrix(pred_gbm,Valid$classe)
+conf_gbm
+```
+
+## SVM
+Finally, we try a support vector machine.
+
+```{r, echo=TRUE,message=FALSE,cache=TRUE}
+library(e1071)
+set.seed(323)
+fit_svm <- svm(classe~., data=Train)
+pred_svm <- predict(fit_svm, Valid)
+conf_svm <- confusionMatrix(pred_svm,Valid$classe)
+conf_svm
+```
+
+An ensemble classifier trained on the predictions of the individual models could 
+potentially be used to enhance prediction accuracy further. However, since each of the 
+models created so far already have such high accuracy on the unseen data, the
+potential increase in accuracy is quite small. If we were going to create an ensemble model
+ it would probably be worth splitting the data to focus on cases where the constituent models 
+ disagreed. In any case, our best performing model, the random forest, will be used to 
+ predict the true OOS data for the quiz.
+
+# Quiz Prediction
+Recall that the prediction accuracies of our three models on the validation data 
+were as follows:
+
+* Random Forest: 0.9978
+* Gradient Boosting: 0.9945
+* Support Vector Machine: 0.9545
+
+We will use the random forest model on the quiz test data as it has the highest
+ tested accuracy. We will also apply the same pre-processing procedure we 
+ performed on the test data.
+
+```{r, echo=TRUE,message=FALSE,cache=TRUE}
+test_oos <- test_oos[,-which(NAvars)]
+test_oos <- test_oos[,-NZVars]
+predict(fit_rf, test_oos)
+```
+
+It turns out these predictions were all correct. If they were not, we could try 
+updating our model using the full set of training data, including the data that 
+was previously used for validation.
